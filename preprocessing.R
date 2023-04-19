@@ -751,7 +751,14 @@ summary(cox.cv)
 
 summary(cox.fit)
 
-
+p = nrow(x)
+beta_mat = array(rep(NA, S*p), c(S,p))
+for (i in 1:1000)
+{
+  model = readRDS(file = paste('bootstrap/cox_model_', i, '.RDS', sep = ''))
+  model$beta
+  
+}
 
 
 #########################################################
