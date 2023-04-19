@@ -337,7 +337,22 @@ vars4 = paste(interaction_terms, collapse = " + ")
 vars_all = paste(vars1, vars2, vars3, vars4, sep = " + ")
 form = paste(" ~  ", "treatment + ", vars_all, " + treatment:(", vars_all, ")")
 
-model_matrix <- model.matrix(as.formula(form), data = data_BIDC_common)
+# STANDARDIZE THE VARIABLES FOLLOWING GELMAN
+data_BIDC_common_std = data_BIDC_common
+
+cont.names = c(main_effects, gene_expr_names)
+
+for (i in 1:ncol(data_BIDC_common))
+{
+  if (names(data_BIDC_common)[i] %in% cont.names)
+  {
+    data_BIDC_common_std[,i] = (data_BIDC_common[,i] - mean(data_BIDC_common[,i]))/ (2*sd(data_BIDC_common[,i]))
+  }
+} 
+
+
+
+model_matrix <- model.matrix(as.formula(form), data = data_BIDC_common_std)
 model_matrix[1,1:10]
 
 dim(model_matrix)
@@ -501,6 +516,8 @@ saveRDS(en.gehan.cv, file = 'gehan_train.RDS')
 x = model_matrix
 
 set.seed(6)
+p = ncol(x)
+penalty = c(0, rep(1, p-1))
 en.cox.cv =  cv.glmnet(x[-index,], y[-index,], family = "cox", alpha = 0.5, nlambda = 30, nfold = 5)
 
 sum(abs(en.gehan$beta))
@@ -520,10 +537,9 @@ preds.gehan <- penAFT.predict(en.gehan.cv, Xnew = dataX[index,], lambda = lambda
 dim(en.cox.cv$glmnet.fit$beta)
 en.cox.cv$index
 
-beta.cox = en.cox.cv$glmnet.fit$beta[,4]
-lambda.cox = en.cox.cv$glmnet.fit$lambda[4]
+beta.cox = en.cox.cv$glmnet.fit$beta[,6]
+lambda.cox = en.cox.cv$glmnet.fit$lambda[6]
 
-beta.cox = en.cox.cv$glmnet.fit$beta[,4]
 
 preds.cox <- x[index,]%*%beta.cox
 
@@ -533,8 +549,8 @@ death = delta[index]
 get.concordance(-preds.cox, truth_test, death)
 get.concordance(preds.gehan, truth_test, death)
 
-# Cox - 0.7155
-# Semiparametric AFT - 0.6437
+# Cox - 0.66749
+# Semiparametric AFT - 0.62239
 
 
 ###################################################################
@@ -626,17 +642,18 @@ vars3 = paste(categorical_recoded, collapse = " + ")
 vars3 = paste(gene_expr_names, collapse = " + ")
 vars4 = paste(interaction_terms, collapse = " + ")
 
+x = model_matrix
 
 vars_all = paste(vars1, vars2, vars3, vars4, sep = " + ")
 form_2 = paste("treatment ~  ", vars_all)
 
-x_prop <- model.matrix(as.formula(form), data = data_BIDC_common)
+x_prop <- model.matrix(as.formula(form_2), data = data_BIDC_common_std)
 treatment = data_BIDC_common$treatment
 
 # ridge regression
 set.seed(3)
 prop.cv  = cv.glmnet(x_prop, treatment, family = "binomial", alpha = 0, nlambda = 30, nfold = 5)
-e.vec = predict(prop.cv, newx = x, s = prop.cv$lambda.min, type = 'response')
+e.vec = predict(prop.cv, newx = x_prop, s = prop.cv$lambda.min, type = 'response')
 omega = 1
 W.vec = omega / (treatment*e.vec + (1-treatment)*e.vec)
 
@@ -654,6 +671,86 @@ sum(abs(cox.fit$beta[,1]) > 1e-10)
 cox.fit$beta[,1][abs(cox.fit$beta[,1]) > 1e-10]
 
 # Exclude treatment from the penalized predictors
+p = ncol(x)
+penalty = c(0, 0, rep(1, p-2))
+
+
+set.seed(4)
+cox.cv = cv.glmnet(x, y, weights = W.vec, penalty.factor = penalty, family = "cox", alpha = 0.5, nlambda = 30, nfold = 5)
+lambda.cox = cox.cv$lambda.min
+
+cox.fit =  glmnet(x, y, weights = W.vec, family = "cox", alpha = 0.5, penalty.factor = penalty, lambda = c(lambda.cox))
+
+cox.fit$beta[,1]['treatment']
+
+cox.fit$beta[,1][abs(cox.fit$beta[,1]) > 1e-10][order(cox.fit$beta[,1][abs(cox.fit$beta[,1]) > 1e-10], decreasing = TRUE)]
+
+
+################################################
+###### Estimate RACE ###########################
+################################################
+
+get.race = function(x, model, weights)
+{
+  n = nrow(x)
+  ind = which(colnames(x) == 'treatment')
+  x0 = x
+  x1 = x
+  x0[,ind] = 0
+  x1[,ind] = 1
+  
+  scurve0 = survival::survfit(cox.fit, s = lambda.cox, x = x, y = y, weights = weights, newx = x0)
+  scurve1 = survival::survfit(cox.fit, s = lambda.cox, x = x, y = y, weights = weights, newx = x1)
+  
+  AUC0 = sum(rowMeans(scurve0$surv) * c(scurve0$time[1], diff(scurve0$time)))
+  AUC1 = sum(rowMeans(scurve1$surv) * c(scurve1$time[1], diff(scurve1$time)))
+  
+  RACE = AUC1 - AUC0
+  return(RACE)
+
+}
+
+get.race(x, cox.fit, W.vec)
+
+# BOOTSTARP 
+n = nrow(x)
+S = 1000
+boot.RACE = vector(length = S)
+ind_matrix = array(rep(NA, n*S), c(S,n))
+
+set.seed(4)
+for (i in 1:S)
+{
+  cat('Progress: ', i/S, '\n')
+  boot_ind = sample(1:n, size = n, replace = TRUE)
+  x_boot = x[boot_ind,]
+  y_boot = y[boot_ind,]
+  W_boot = W.vec[boot_ind,]
+  
+  ind_matrix[i,] = boot_ind
+  
+  cox.cv.boot = cv.glmnet(x_boot, y_boot, weights = W_boot, penalty.factor = penalty, family = "cox", alpha = 0.5, nlambda = 30, nfold = 5)
+  lambda.cox.boot = cox.cv.boot$lambda.min
+  
+  #lambda.cox.boot = lambda.cox
+  cox.fit.boot = glmnet(x_boot, y_boot, weights = W_boot, family = "cox", alpha = 0.5, penalty.factor = penalty, lambda = c(lambda.cox.boot))
+  
+  saveRDS(cox.fit.boot, file = paste('bootstrap/cox_model_', i, '.RDS', sep = ''))
+  #saveRDS(boot.ind, file)
+  
+  boot.RACE[i] = get.race(x_boot, cox.fit.boot, W_boot)
+}
+
+saveRDS(ind_matrix, file = 'bootstrap/indexes.RDS')
+
+
+mean(boot.RACE)
+quantile(boot.RACE, c(0.025, 0.975))
+
+summary(cox.cv)
+
+summary(cox.fit)
+
 
 
 
@@ -699,7 +796,21 @@ plot(survival::survfit(cox.fit, s = 0.05, x = dataX[-index,], y = y[-index], new
 plot(survival::survfit(cox.fit, s = 0.05, newx = dataX[1:3,]))
 
 
-scurve = survival::survfit(cox.fit, s = lambda.cox, x = dataX, y = y, newx = dataX[2,])
+scurve = survival::survfit(cox.fit, s = lambda.cox, x = x, y = y, newx = x)
+
+scurve$time
+
+scurve$n.event
+
+plot(scurve)
+
+scurve$n.event
+
+dim(scurve$surv)
+
+rowMeans(scurve$surv)
+
+scurve$time
 
 # USE THESE TO COMPUTE THE AREA UNDER THE CURVE FOR EACH INDIVIDUAL AND THEN AVERAGE IT OUT !!!!
 # OR AVERAGE IT OUT BEFOREHAND - I THINK THE EVENT TIMES SHOULD BE THE SAME
