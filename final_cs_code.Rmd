@@ -693,6 +693,7 @@ p_prop_score <- ggplot(data_EDA, aes(x = prop_score, fill = Mastectomy,
   scale_color_discrete(guide = "none")
 p_prop_score
 ```
+
 ```{r}
 
 PlotKMCurve <- function(group_var, var_name = NULL, data, y) {
@@ -706,12 +707,15 @@ PlotKMCurve <- function(group_var, var_name = NULL, data, y) {
       fill = element_blank(), color = element_blank()
     )
 }
+
 fig1 <- PlotKMCurve("Mastectomy", var_name = NULL, data_EDA, y) +
   labs(subtitle = "") +
   scale_color_manual(values = c("purple", "orange"), labels = c("BCS", "Mastectomy")) +
   scale_fill_manual(values = c("purple", "orange"), labels = c("BCS", "Mastectomy"))
 
+pdf("plots/surv_curve.pdf", height = 3.5, width = 6)
 fig1
+dev.off()
 
 
 fig_stage1 <- PlotKMCurve("Mastectomy", var_name = NULL, data_EDA[data_EDA$tumor_stage == 1,], y[data_EDA$tumor_stage == 1,]) +
