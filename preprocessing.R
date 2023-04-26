@@ -103,6 +103,19 @@ names(data_mice)
 mice_obj <- mice(data = data_mice, m = 1)
 data_full <- complete(mice_obj)
 
+#########################################
+#########################################
+
+mice_obj_sens <- mice(data = data_mice, m = 5)
+data_full_sens_2 <- complete(mice_obj_sens, 2)
+data_full_sens_3 <- complete(mice_obj_sens, 3)
+
+dim(data_full_sens)
+
+abs(max(data_full - data_full_sens))
+#########################################
+#########################################
+
 data_BIDC[,1:24] = data_full
 
 data_BIDC$tumor_stage = 0*(data_BIDC$tumor_stage == 0) + 1*(data_BIDC$tumor_stage == 1) + 2*(data_BIDC$tumor_stage == 2) + 3*(data_BIDC$tumor_stage == 3) + 4*(data_BIDC$tumor_stage == 4)
@@ -112,10 +125,10 @@ sum(data_BIDC$tumor_stage == 0)
 sum(data$tumor_stage == 4,na.rm = TRUE)
 
 # Drop patients with stage 0 or stage 4 tumor
-
 data_BIDC = data_BIDC[data_BIDC$tumor_stage != 0 & data_BIDC$tumor_stage != 4,]
 
 sum(is.na(data_BIDC))
+
 # 0 - pre, 1 - post menopause
 data_BIDC$menopause = 1*(data_BIDC$inferred_menopausal_state == "Post")
 
@@ -172,7 +185,6 @@ sum(is.na(data_BIDC))
 
 
 gene_expr_names = names(data_BIDC)[26:514]
-
 mutation_names = names(data_BIDC)[515:687]
 
 sum(is.na(data_BIDC))
@@ -539,8 +551,6 @@ en.cox.cv$index
 
 beta.cox = en.cox.cv$glmnet.fit$beta[,6]
 lambda.cox = en.cox.cv$glmnet.fit$lambda[6]
-
-
 preds.cox <- x[index,]%*%beta.cox
 
 truth_test = logY[index]
