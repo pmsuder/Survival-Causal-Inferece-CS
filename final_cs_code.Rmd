@@ -880,9 +880,6 @@ cox.fit_5 =  glmnet(x_5, y_5, weights = W.vec_5, family = "cox", alpha = 0.5, pe
 ```
 
 ```{r}
-cox.en.beta
-cox.en.beta.nonzero
-
 
 cox.en.beta_2 = cox.fit_2$beta[,1]
 cox.en.beta.nonzero_2 = cox.fit_2$beta[,1][abs(cox.fit_2$beta[,1]) > 1e-10][order(cox.fit_2$beta[,1][abs(cox.fit_2$beta[,1]) > 1e-10], decreasing = TRUE)]
@@ -1168,6 +1165,9 @@ dev.off()
 ```
 
 
+```{r}
+
+```
 
 
 
