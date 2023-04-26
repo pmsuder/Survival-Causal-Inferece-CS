@@ -24,7 +24,7 @@ knitr::opts_chunk$set(echo = TRUE)
 options(warn=-1)
 if (!require(pacman)) install.packages("pacman")
 pacman::p_load(tidyverse, glmnet, iregnet, penAFT,
-               survival, mice, ggsurvfit, dplyr)
+               survival, mice, ggsurvfit, dplyr, xtable, ggplot2)
 
 dir.create("plots", showWarnings = F)
 theme_set(theme_classic(base_size = 12))
@@ -656,8 +656,28 @@ W.vec = c(W.vec)
 data_EDA = data_BIDC_common
 data_EDA$prop_score = e.vec
 
+data_EDA$death = ifelse(delta, "Yes", "No")
+
+
+print(nrow(data_EDA))
+print(sum(delta))
+
+data_EDA$treatment_name = data_EDA$type_of_breast_surgery
+
+
+g1 <- ggplot(data_EDA, aes(x = treatment_name, fill = death)) +
+  geom_bar(position = "fill") +
+  ggtitle("Censoring by Treatment") +
+  theme(axis.title.x = element_blank()) +
+  labs(fill = "Death Observed", y = "Proportion")
+
+
+pdf("plots/censoring_by_trt.pdf", height = 3.5, width = 6)
+g1
+dev.off()
 
 ```
+
 
 ```{r}
 data_EDA = data_BIDC_common
@@ -787,38 +807,10 @@ cox.en.beta.nonzero = cox.fit$beta[,1][abs(cox.fit$beta[,1]) > 1e-10][order(cox.
 
 ```
 
-### Estimating RACE
-
-```{r}
-
-get.race = function(x, model, weights)
-{
-  n = nrow(x)
-  ind = which(colnames(x) == 'treatment')
-  x0 = x
-  x1 = x
-  x0[,ind] = 0
-  x1[,ind] = 1
-  
-  scurve0 = survival::survfit(cox.fit, s = lambda.cox, x = x, y = y, weights = weights, newx = x0)
-  scurve1 = survival::survfit(cox.fit, s = lambda.cox, x = x, y = y, weights = weights, newx = x1)
-  
-  AUC0 = sum(rowMeans(scurve0$surv) * c(scurve0$time[1], diff(scurve0$time)))
-  AUC1 = sum(rowMeans(scurve1$surv) * c(scurve1$time[1], diff(scurve1$time)))
-  
-  RACE = AUC1 - AUC0
-  return(RACE)
-
-}
-```
-
-```{r}
-get.race(x, cox.fit, W.vec)
-
-```
 
 
-# SENSITIVITY ANALYSIS !!!!
+### Sensitivity Anaysis - different MICE imputations
+
 ```{r}
 x_2 = model_matrix_2
 x_3 = model_matrix_3
@@ -916,6 +908,8 @@ cox.fit_3$beta[common]
 cox.fit_4$beta[common]
 cox.fit_5$beta[common]
 
+sum((cox.fit$beta[common] > 0 & cox.fit_2$beta[common] <= 0) | (cox.fit$beta[common] <= 0 & cox.fit_2$beta[common] > 0)) 
+
 sum((cox.fit_2$beta[common] > 0 & cox.fit_3$beta[common] <= 0) | (cox.fit_2$beta[common] <= 0 & cox.fit_3$beta[common] > 0)) 
 
 sum((cox.fit_2$beta[common] > 0 & cox.fit_4$beta[common] <= 0) | (cox.fit_2$beta[common] <= 0 & cox.fit_4$beta[common] > 0)) 
@@ -923,23 +917,23 @@ sum((cox.fit_2$beta[common] > 0 & cox.fit_4$beta[common] <= 0) | (cox.fit_2$beta
 sum((cox.fit_2$beta[common] > 0 & cox.fit_5$beta[common] <= 0) | (cox.fit_2$beta[common] <= 0 & cox.fit_5$beta[common] > 0)) 
 ```
 
-### Sensitivity Analysis
+<!-- ### Sensitivity Analysis -->
 
-```{r}
-cox.en.beta_2 = cox.fit_2$beta[,1]
-cox.en.beta.nonzero_2 = cox.fit_2$beta[,1][abs(cox.fit_2$beta[,1]) > 1e-10][order(cox.fit_2$beta[,1][abs(cox.fit_2$beta[,1]) > 1e-10], decreasing = TRUE)]
+<!-- ```{r} -->
+<!-- cox.en.beta_2 = cox.fit_2$beta[,1] -->
+<!-- cox.en.beta.nonzero_2 = cox.fit_2$beta[,1][abs(cox.fit_2$beta[,1]) > 1e-10][order(cox.fit_2$beta[,1][abs(cox.fit_2$beta[,1]) > 1e-10], decreasing = TRUE)] -->
 
-cox.en.beta_3 = cox.fit_3$beta[,1]
-cox.en.beta.nonzero_3 = cox.fit_3$beta[,1][abs(cox.fit_3$beta[,1]) > 1e-10][order(cox.fit_3$beta[,1][abs(cox.fit_3$beta[,1]) > 1e-10], decreasing = TRUE)]
+<!-- cox.en.beta_3 = cox.fit_3$beta[,1] -->
+<!-- cox.en.beta.nonzero_3 = cox.fit_3$beta[,1][abs(cox.fit_3$beta[,1]) > 1e-10][order(cox.fit_3$beta[,1][abs(cox.fit_3$beta[,1]) > 1e-10], decreasing = TRUE)] -->
 
-cox.en.beta_4 = cox.fit_4$beta[,1]
-cox.en.beta.nonzero_4 = cox.fit_4$beta[,1][abs(cox.fit_4$beta[,1]) > 1e-10][order(cox.fit_4$beta[,1][abs(cox.fit_4$beta[,1]) > 1e-10], decreasing = TRUE)]
+<!-- cox.en.beta_4 = cox.fit_4$beta[,1] -->
+<!-- cox.en.beta.nonzero_4 = cox.fit_4$beta[,1][abs(cox.fit_4$beta[,1]) > 1e-10][order(cox.fit_4$beta[,1][abs(cox.fit_4$beta[,1]) > 1e-10], decreasing = TRUE)] -->
 
-cox.en.beta_5 = cox.fit_5$beta[,1]
-cox.en.beta.nonzero_5 = cox.fit_5$beta[,1][abs(cox.fit_5$beta[,1]) > 1e-10][order(cox.fit_5$beta[,1][abs(cox.fit_5$beta[,1]) > 1e-10], decreasing = TRUE)]
+<!-- cox.en.beta_5 = cox.fit_5$beta[,1] -->
+<!-- cox.en.beta.nonzero_5 = cox.fit_5$beta[,1][abs(cox.fit_5$beta[,1]) > 1e-10][order(cox.fit_5$beta[,1][abs(cox.fit_5$beta[,1]) > 1e-10], decreasing = TRUE)] -->
 
 
-```
+<!-- ``` -->
 
 ```{r}
 get.race.unpenalized = function(x, model, weights)
@@ -962,6 +956,8 @@ get.race.unpenalized = function(x, model, weights)
 
 }
 ```
+
+Fitting the Cox model with selected variables
 
 ```{r}
 data_matrix = data.frame(model_matrix)
@@ -1005,17 +1001,20 @@ summary(coxmodel)
 ```{r}
 mod = coxmodel
 sum.cox = summary(coxmodel)
-coefs <- tibble(coef = names(mod$coefficients),
-                estimate = unname(mod$coefficients),
-                se = unname(summary(mod)$tTable[,"Std.Error"]),
-                lower = estimate - qnorm(0.975)*se,
-                upper = estimate + qnorm(0.975)*se)
 
-coxmodel$coefficients
+sum.cox$coefficients
+
+coefs = tibble(coef = rownames(sum.cox$coefficients), estimate = unname(sum.cox$coefficients[,1]), exp_estimate = unname(sum.cox$coefficients[,2]),
+               robust_se = unname(sum.cox$coefficients[,4]), pval = unname(sum.cox$coefficients[,6]))
+
+xtable(coefs, caption = "…", digits = 3, display = c('g','g', 'g', 'g', 'g', 'g')) 
+
+
+#coefs
 ```
 
 ```{r}
-survfit(formula = coxmodel, newdata = data_matrix)
+#survfit(formula = coxmodel, newdata = data_matrix)
 
 get.race.unpenalized(data_matrix, coxmodel, W.vec)
 ```
@@ -1112,28 +1111,13 @@ ind_matrix = array(rep(NA, n*S), c(S,n))
 #saveRDS(boot.RACE.unpenalized, file = 'boot_RACE_unpenalized.RDS')
 
 boot.RACE.unpenalized = readRDS(file = 'boot_RACE_unpenalized.RDS')
-boot.RACE.unpenalized 
-# 
-# for (i in 1:1000)
-# {
-#   model = readRDS(file = paste('bootstrap/cox_model_', i, '.RDS', sep = ''))
-#   beta_mat[i,] = model$beta[,1]
-# }
-# 
-# CI_mat = array(rep(NA, p*2), c(p,2))
-# for (j in 1:p)
-# {
-#   CI_mat[j,] = quantile(beta_mat[,j], c(0.025, 0.975))
-# }
-# 
-# nonzero.ind = which(abs(cox.fit$beta[,1]) > 1e-10)
-# CI_mat[nonzero.ind,]
-# beta.nonzero
+
+#boot.RACE.unpenalized 
 
 ```
 
 ```{r}
-boot.RACE.unpenalized
+#boot.RACE.unpenalized
 quantile(boot.RACE.unpenalized, c(0.025, 0.975))
 ```
 
@@ -1179,45 +1163,6 @@ lines(lim, lim, col='red', lwd=1)
 dev.off()
 ```
 
-### Concordance
-
-```{r}
-
-coxmodel_train <- coxph(y[-index] ~ kdm3a.kdm3a_mut  + lymph_nodes_examined_positive +
-                      treatment      +     as.factor(integrative_cluster5) +
-                    as.factor(integrative_cluster3) +
-                          gsk3b      +      treatment.tumor_size +
-                          prkg1     +             treatment.e2f8 +
-                       eif4ebp1      +          treatment.zfyve9 +
-                treatment.ush2a       +                     dll3 +
-                treatment.nrarp        +              tumor_size +
-                 treatment.e2f7         +                   e2f7 +
-                          smad7          +                  men1 +
-                         prkacg           +     treatment.notch1 +
-                          pdgfb            +        as.factor(tumor_stage2) +
-                          mmp25             +   treatment.acvr1c +
-               treatment.srd5a3             +  treatment.hsd17b7 +
-                           mlh1             +              casp7 +
-                          brca2             +     treatment.rpgr +
-              treatment.ugt2b17             +               igf1 +
-                 treatment.nrg3             +             map3k1 +
-                           mapt             +               e2f1 +
-                        ugt2b17 +
-                 treatment.inha             +             diras3 +
-                  tp53.tp53_mut             +        atr.atr_mut +
-                gata3.gata3_mut             +             acvr1c +
-                           cul1             +             stat5a +
-                 treatment.cul1 + as.factor(pam50_._claudin.low_subtypeLumA) +
-                birc6.birc6_mut           +    treatment.cyp11a1 +
-                  tbx3.tbx3_mut           +       treatment.mapt, weights = W.vec[-index], data = data_matrix[-index,])
-
-
-
-pred_test_cox <- predict(coxmodel_train, newdata=data_matrix[index,], type='risk', se=FALSE)
-
-get.concordance(pred_test = -pred_test_cox, truth_test = truth_test, death = death)
-
-```
 
 
 
