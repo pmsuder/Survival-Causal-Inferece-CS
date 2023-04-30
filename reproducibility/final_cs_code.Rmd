@@ -1,0 +1,1291 @@
+---
+title: "Final Case Study"
+author: "Piotr Suder"
+date: "2023-04-19"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+rm(list = ls())
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+### Basic dependencies:
+
+  - R>=4.1  # https://www.r-project.org/
+  
+  - RStudio>=1.4.1717  # https://posit.co/download/rstudio-desktop/
+  
+  
+### R Package Dependencies
+
+```{r}
+options(warn=-1)
+if (!require(pacman)) install.packages("pacman")
+pacman::p_load(tidyverse, glmnet, iregnet, penAFT,
+               survival, mice, ggsurvfit, dplyr, xtable, ggplot2, gridExtra, ggtext, cobalt)
+
+dir.create("plots", showWarnings = F)
+theme_set(theme_classic(base_size = 12))
+```
+
+### System Information
+
+
+```{r}
+sessionInfo()
+```
+
+Load data
+
+```{r}
+data = read.csv('METABRIC_RNA_Mutation.csv')
+
+sum(is.na(data))
+
+# drop the patient with sarcoma
+sum(data$cancer_type == "Breast Sarcoma")
+
+# only keep patients with Breast Invasive Ductal Carcinoma
+data = data[data$cancer_type_detailed == 'Breast Invasive Ductal Carcinoma',]
+
+# Drop the rare claudin low subtype
+data = data[data$pam50_._claudin.low_subtype != 'NC',]
+
+# drop: patient_id
+data = data %>% select(-c('patient_id', 'cancer_type', 'cancer_type_detailed', 'cohort', 'overall_survival'))
+
+sum(is.na(data))
+
+# select only the ones for which we know the surgery type
+data_sel = data[data$type_of_breast_surgery != "",]
+
+sum(is.na(data_sel$overall_survival_months))
+
+data_sel = Filter(function(x)(length(unique(x))>1), data_sel)
+data_BIDC = data_sel
+
+#print(names(data_BIDC))
+
+#sum(is.na(data_sel))
+
+num_cols = ncol(data_sel)
+for (i in 1:num_cols)
+{
+  if (sum(is.na(data_sel[,i])) > 0)
+  {
+    print(i)
+    print(colnames(data_sel[i]))
+  }
+}
+
+
+# Recode the treatment prodecures: 0 - breast conserving, 1 - mastectomy
+data_BIDC$treatment = 1*(data_BIDC$type_of_breast_surgery == "MASTECTOMY")
+unique(data_BIDC$type_of_breast_surgery)
+
+data_BIDC$primary_tumor_laterality[data_BIDC$primary_tumor_laterality == ""] = NA
+data_BIDC$inferred_menopausal_state[data_BIDC$inferred_menopausal_state == ""] = NA
+data_BIDC$er_status_measured_by_ihc[data_BIDC$er_status_measured_by_ihc == ""] = NA
+
+
+sum(is.na(data_BIDC$primary_tumor_laterality))
+sum(is.na(data_BIDC$inferred_menopausal_state))
+sum(is.na(data_BIDC$er_status_measured_by_ihc))
+
+sum(is.na(data_BIDC[,26:514]))
+```
+
+### Data Imputation with MICE
+
+```{r}
+
+categorical_vars <- c("cellularity", "pam50_._claudin.low_subtype",
+                      "neoplasm_histologic_grade", "tumor_other_histologic_subtype",
+                      "integrative_cluster", "X3.gene_classifier_subtype")
+
+other_categorical = c("inferred_menopausal_state",
+                      "primary_tumor_laterality",
+                      "pr_status",
+                      "tumor_stage",
+                      "her2_status",
+                      "er_status_measured_by_ihc",
+                      "radio_therapy", "hormone_therapy", "chemotherapy")
+
+data_mice <- data_BIDC %>% mutate(across(all_of(unlist(c(categorical_vars, other_categorical))), factor))
+
+data_BIDC_2 = data_BIDC
+data_BIDC_3 = data_BIDC
+data_BIDC_4 = data_BIDC
+data_BIDC_5 = data_BIDC
+
+data_mice = data_mice[,1:24]
+#sum(is.na(data_mice))
+names(data_mice)
+
+set.seed(5)
+mice_obj <- mice(data = data_mice, m = 5)
+
+data_full <- complete(mice_obj,1)
+data_full_2 <- complete(mice_obj,2)
+data_full_3 <- complete(mice_obj,3)
+data_full_4 <- complete(mice_obj,4)
+data_full_5 <- complete(mice_obj,5)
+
+data_BIDC[,1:24] = data_full
+data_BIDC_2[,1:24] = data_full_2
+data_BIDC_3[,1:24] = data_full_3
+data_BIDC_4[,1:24] = data_full_4
+data_BIDC_5[,1:24] = data_full_5
+
+data_BIDC$tumor_stage = 0*(data_BIDC$tumor_stage == 0) + 1*(data_BIDC$tumor_stage == 1) + 2*(data_BIDC$tumor_stage == 2) + 3*(data_BIDC$tumor_stage == 3) + 4*(data_BIDC$tumor_stage == 4)
+
+
+data_BIDC_2$tumor_stage = 0*(data_BIDC_2$tumor_stage == 0) + 1*(data_BIDC_2$tumor_stage == 1) + 2*(data_BIDC_2$tumor_stage == 2) + 3*(data_BIDC_2$tumor_stage == 3) + 4*(data_BIDC_2$tumor_stage == 4)
+
+data_BIDC_3$tumor_stage = 0*(data_BIDC_3$tumor_stage == 0) + 1*(data_BIDC_3$tumor_stage == 1) + 2*(data_BIDC_3$tumor_stage == 2) + 3*(data_BIDC_3$tumor_stage == 3) + 4*(data_BIDC_3$tumor_stage == 4)
+
+data_BIDC_4$tumor_stage = 0*(data_BIDC_4$tumor_stage == 0) + 1*(data_BIDC_4$tumor_stage == 1) + 2*(data_BIDC_4$tumor_stage == 2) + 3*(data_BIDC_4$tumor_stage == 3) + 4*(data_BIDC_4$tumor_stage == 4)
+
+data_BIDC_5$tumor_stage = 0*(data_BIDC_5$tumor_stage == 0) + 1*(data_BIDC_5$tumor_stage == 1) + 2*(data_BIDC_5$tumor_stage == 2) + 3*(data_BIDC_5$tumor_stage == 3) + 4*(data_BIDC_5$tumor_stage == 4)
+
+
+
+```
+
+```{r}
+
+# 0 - pre, 1 - post menopause
+data_BIDC$menopause = 1*(data_BIDC$inferred_menopausal_state == "Post")
+
+# 0 - left, 1 - right
+data_BIDC$tumor_laterality = 1*(data_BIDC$primary_tumor_laterality == "Right")
+
+# Recode more variables
+data_BIDC$progesterone_status = 1*(data_BIDC$pr_status == "Positive")
+data_BIDC$HER2_status = 1*(data_BIDC$her2_status == "Positive")
+data_BIDC$er_status_ihc = 1*(data_BIDC$er_status_measured_by_ihc == "Positive")
+
+###################################################
+# 0 - pre, 1 - post menopause
+data_BIDC_2$menopause = 1*(data_BIDC_2$inferred_menopausal_state == "Post")
+
+# 0 - left, 1 - right
+data_BIDC_2$tumor_laterality = 1*(data_BIDC_2$primary_tumor_laterality == "Right")
+
+# Recode more variables
+data_BIDC_2$progesterone_status = 1*(data_BIDC_2$pr_status == "Positive")
+data_BIDC_2$HER2_status = 1*(data_BIDC_2$her2_status == "Positive")
+data_BIDC_2$er_status_ihc = 1*(data_BIDC_2$er_status_measured_by_ihc == "Positive")
+##################################################
+
+###################################################
+# 0 - pre, 1 - post menopause
+data_BIDC_3$menopause = 1*(data_BIDC_3$inferred_menopausal_state == "Post")
+
+# 0 - left, 1 - right
+data_BIDC_3$tumor_laterality = 1*(data_BIDC_3$primary_tumor_laterality == "Right")
+
+# Recode more variables
+data_BIDC_3$progesterone_status = 1*(data_BIDC_3$pr_status == "Positive")
+data_BIDC_3$HER2_status = 1*(data_BIDC_3$her2_status == "Positive")
+data_BIDC_3$er_status_ihc = 1*(data_BIDC_3$er_status_measured_by_ihc == "Positive")
+##################################################
+
+###################################################
+# 0 - pre, 1 - post menopause
+data_BIDC_4$menopause = 1*(data_BIDC_4$inferred_menopausal_state == "Post")
+
+# 0 - left, 1 - right
+data_BIDC_4$tumor_laterality = 1*(data_BIDC_4$primary_tumor_laterality == "Right")
+
+# Recode more variables
+data_BIDC_4$progesterone_status = 1*(data_BIDC_4$pr_status == "Positive")
+data_BIDC_4$HER2_status = 1*(data_BIDC_4$her2_status == "Positive")
+data_BIDC_4$er_status_ihc = 1*(data_BIDC_4$er_status_measured_by_ihc == "Positive")
+##################################################
+
+###################################################
+# 0 - pre, 1 - post menopause
+data_BIDC_5$menopause = 1*(data_BIDC_5$inferred_menopausal_state == "Post")
+
+# 0 - left, 1 - right
+data_BIDC_5$tumor_laterality = 1*(data_BIDC_5$primary_tumor_laterality == "Right")
+
+# Recode more variables
+data_BIDC_5$progesterone_status = 1*(data_BIDC_5$pr_status == "Positive")
+data_BIDC_5$HER2_status = 1*(data_BIDC_5$her2_status == "Positive")
+data_BIDC_5$er_status_ihc = 1*(data_BIDC_5$er_status_measured_by_ihc == "Positive")
+##################################################
+
+```
+
+```{r}
+data_BIDC_excl = data_BIDC[data_BIDC$tumor_stage != 0 & data_BIDC$tumor_stage != 4,]
+
+data_BIDC_excl_2 = data_BIDC[data_BIDC_2$tumor_stage != 0 & data_BIDC_2$tumor_stage != 4,]
+data_BIDC_excl_3 = data_BIDC[data_BIDC_3$tumor_stage != 0 & data_BIDC_3$tumor_stage != 4,]
+data_BIDC_excl_4 = data_BIDC[data_BIDC_4$tumor_stage != 0 & data_BIDC_4$tumor_stage != 4,]
+data_BIDC_excl_5 = data_BIDC[data_BIDC_5$tumor_stage != 0 & data_BIDC_5$tumor_stage != 4,]
+```
+
+
+```{r}
+# Mutation indicators
+gene_expr_names = names(data_BIDC)[26:514]
+mutation_names = names(data_BIDC)[515:687]
+
+for (var in mutation_names) {
+  data_BIDC[[var]] <- as.integer(data_BIDC[[var]] != 0)
+  
+  data_BIDC_2[[var]] <- as.integer(data_BIDC_2[[var]] != 0)
+  data_BIDC_3[[var]] <- as.integer(data_BIDC_3[[var]] != 0)
+  data_BIDC_4[[var]] <- as.integer(data_BIDC_4[[var]] != 0)
+  data_BIDC_5[[var]] <- as.integer(data_BIDC_5[[var]] != 0)
+}
+
+
+
+# Exclude patients with rare mutations
+p = ncol(data_BIDC)
+n = nrow(data_BIDC)
+include = rep(FALSE, n)
+
+n_2 = nrow(data_BIDC_2)
+n_3 = nrow(data_BIDC_3)
+n_4 = nrow(data_BIDC_4)
+n_5 = nrow(data_BIDC_5)
+
+include_2 = rep(FALSE, nrow(data_BIDC_2))
+include_3 = rep(FALSE, nrow(data_BIDC_3))
+include_4 = rep(FALSE, nrow(data_BIDC_4))
+include_5 = rep(FALSE, nrow(data_BIDC_5))
+
+for (i in 1:n)
+{
+  if (sum(as.numeric(data_BIDC[i,c(608, 611:614, 616:687)])) == 0) 
+  {
+    include[i] = TRUE
+  }
+}
+
+sum(include)
+
+sum(as.numeric((data_BIDC[,608] != 0)))
+
+for (s in 611:614)
+{
+  print(sum(as.numeric((data_BIDC[,s] != 0))))
+}
+
+
+sum(include)
+
+########################### EARLY EDA ###########
+data_check = data_BIDC[include,]
+
+sum(data_check$treatment)
+nrow(data_check) - sum(data_check$treatment)
+colnames(data_check)[1:30]
+
+sum(data_check$death_from_cancer == "Died of Disease" & data_check$treatment == 1) / sum(data_check$treatment == 1)
+sum(data_check$death_from_cancer == "Died of Disease" & data_check$treatment == 0) / sum(data_check$treatment == 0)
+
+
+sum(is.na(data_sel[include,8])) / 889
+sum(is.na(data_sel[include,17])) / 889
+sum(is.na(data_sel[include,23])) / 889
+sum(is.na(data_sel[include,24]))/ 889
+
+1 - (nrow(na.omit(data_sel[include,-17])) / nrow(data_sel[include,]))
+
+max(data_check$overall_survival_months)
+min(data_check$overall_survival_months)
+
+data_check$death_from_cancer[data_check$overall_survival_months == max(data_check$overall_survival_months)]
+
+data_check$death_from_cancer[data_check$overall_survival_months == min(data_check$overall_survival_months)]
+
+################################################
+
+data_BIDC_common = data_BIDC[data_BIDC$tumor_stage != 0 & data_BIDC$tumor_stage != 4 & include,]
+
+data_BIDC_common_2 = data_BIDC_2[data_BIDC_2$tumor_stage != 0 & data_BIDC_2$tumor_stage != 4 & include,]
+data_BIDC_common_3 = data_BIDC_3[data_BIDC_3$tumor_stage != 0 & data_BIDC_3$tumor_stage != 4 & include,]
+data_BIDC_common_4 = data_BIDC_4[data_BIDC_4$tumor_stage != 0 & data_BIDC_4$tumor_stage != 4 & include,]
+data_BIDC_common_5 = data_BIDC_5[data_BIDC_5$tumor_stage != 0 & data_BIDC_5$tumor_stage != 4 & include,]
+  
+
+
+nrow(data_BIDC_common)
+```
+We have 19 variables describing patient characteristics, tumor characteristics and other treatments, 489 variables representing gene expression values and 173 indicators of common mutations for a subset of these genes.
+
+
+```{r}
+# delete mutations which did not occur
+mutation_names = setdiff(mutation_names, c("hras_mut", "siah1_mut", "smarcb1_mut", "stmn2_mut", "foxo1_mut", "ccnd3_mut", "ctnna1_mut", "klrg1_mut"))
+
+# delete rare mutations
+mutation_names = setdiff(mutation_names, names(data_BIDC)[c(608, 611:614, 616:685)])
+```
+
+### Creating model matrix
+
+```{r}
+
+# Convert the mutation variables, categorical variables, and treatment to factors
+
+categorical_vars <- c("cellularity", "pam50_._claudin.low_subtype",
+                      "neoplasm_histologic_grade", "tumor_other_histologic_subtype",
+                      "integrative_cluster", "X3.gene_classifier_subtype", 'tumor_stage')
+
+categorical_recoded <- c("menopause", "HER2_status", "progesterone_status", "tumor_laterality", "radio_therapy", "hormone_therapy", "er_status_ihc", "chemotherapy")
+
+
+data_BIDC_common <- data_BIDC_common %>% mutate(across(all_of(unlist(c(categorical_vars))), as.factor))
+
+########################
+data_BIDC_common_2 <- data_BIDC_common_2 %>% mutate(across(all_of(unlist(c(categorical_vars))), as.factor))
+data_BIDC_common_3 <- data_BIDC_common_3 %>% mutate(across(all_of(unlist(c(categorical_vars))), as.factor))
+data_BIDC_common_4 <- data_BIDC_common_4 %>% mutate(across(all_of(unlist(c(categorical_vars))), as.factor))
+data_BIDC_common_5 <- data_BIDC_common_5 %>% mutate(across(all_of(unlist(c(categorical_vars))), as.factor))
+
+#########################
+# Create the interaction terms
+
+interaction_terms <- lapply(1:length(gene_expr_names), function(i) {
+  if (paste0(gene_expr_names[i], "_mut") %in% mutation_names) {
+    return(paste0(gene_expr_names[i], ":", gene_expr_names[i], "_mut"))
+  }
+})
+interaction_terms <- unlist(interaction_terms)
+
+# Define the main effects variables
+main_effects <- c("age_at_diagnosis", "lymph_nodes_examined_positive", "tumor_size")
+
+# Create the formula for the model matrix
+
+vars1 = paste(main_effects, collapse = " + ")
+vars2 = paste(categorical_vars, collapse = " + ")
+vars3 = paste(categorical_recoded, collapse = " + ")
+vars3 = paste(gene_expr_names, collapse = " + ")
+vars4 = paste(interaction_terms, collapse = " + ")
+
+
+vars_all = paste(vars1, vars2, vars3, vars4, sep = " + ")
+form = paste(" ~  ", "treatment + ", vars_all, " + treatment:(", vars_all, ")")
+
+# STANDARDIZE THE VARIABLES FOLLOWING GELMAN
+data_BIDC_common_std = data_BIDC_common
+
+data_BIDC_common_std_2 = data_BIDC_common_2
+data_BIDC_common_std_3 = data_BIDC_common_3
+data_BIDC_common_std_4 = data_BIDC_common_4
+data_BIDC_common_std_5 = data_BIDC_common_5
+
+cont.names = c(main_effects, gene_expr_names)
+
+for (i in 1:ncol(data_BIDC_common))
+{
+  if (names(data_BIDC_common)[i] %in% cont.names)
+  {
+    data_BIDC_common_std[,i] = (data_BIDC_common[,i] - mean(data_BIDC_common[,i]))/ (2*sd(data_BIDC_common[,i]))
+    
+    data_BIDC_common_std_2[,i] = (data_BIDC_common_2[,i] - mean(data_BIDC_common_2[,i]))/ (2*sd(data_BIDC_common_2[,i]))
+    
+    data_BIDC_common_std_3[,i] = (data_BIDC_common_3[,i] - mean(data_BIDC_common_3[,i]))/ (2*sd(data_BIDC_common_3[,i]))
+    
+        data_BIDC_common_std_4[,i] = (data_BIDC_common_4[,i] - mean(data_BIDC_common_4[,i]))/ (2*sd(data_BIDC_common_4[,i]))
+        
+            data_BIDC_common_std_5[,i] = (data_BIDC_common_5[,i] - mean(data_BIDC_common_5[,i]))/ (2*sd(data_BIDC_common_5[,i]))
+            
+  }
+} 
+
+
+
+model_matrix <- model.matrix(as.formula(form), data = data_BIDC_common_std)
+
+model_matrix_2 <- model.matrix(as.formula(form), data = data_BIDC_common_std_2)
+model_matrix_3 <- model.matrix(as.formula(form), data = data_BIDC_common_std_3)
+model_matrix_4 <- model.matrix(as.formula(form), data = data_BIDC_common_std_4)
+model_matrix_5 <- model.matrix(as.formula(form), data = data_BIDC_common_std_5)
+
+
+delta_2 = 1*(data_BIDC_common_2$death_from_cancer == "Died of Disease")
+delta_3 = 1*(data_BIDC_common_3$death_from_cancer == "Died of Disease")
+delta_4 = 1*(data_BIDC_common_4$death_from_cancer == "Died of Disease")
+delta_5 = 1*(data_BIDC_common_5$death_from_cancer == "Died of Disease")
+
+y_2 = Surv(data_BIDC_common_2$overall_survival_months, delta_2)
+y_3 = Surv(data_BIDC_common_3$overall_survival_months, delta_3)
+y_4 = Surv(data_BIDC_common_4$overall_survival_months, delta_4)
+y_5 = Surv(data_BIDC_common_5$overall_survival_months, delta_5)
+
+treatment_2 = data_BIDC_common_2$treatment
+treatment_3 = data_BIDC_common_3$treatment
+treatment_4 = data_BIDC_common_4$treatment
+treatment_5 = data_BIDC_common_5$treatment
+
+```
+
+```{r}
+
+dataX = model_matrix[,2:ncol(model_matrix)]
+logY = log(data_BIDC_common$overall_survival_months)
+delta = 1*(data_BIDC_common$death_from_cancer == "Died of Disease")
+
+x = model_matrix
+y = Surv(data_BIDC_common$overall_survival_months, delta)
+
+p = ncol(dataX)
+
+#weight.set <- list("w" = c(0, rep(1, p-1)))
+#set.seed(3)
+#fit.en.cv <- penAFT.cv(dataX, logY, delta, alpha = 0.5, nlambda = 30, nfolds = 5)
+```
+
+### Out-of-sample performance - concordance
+
+```{r}
+########################################
+####### OUT OF SAMPLE PERFORMANCE ######
+########################################
+
+get.concordance = function(pred_test, truth_test, death)
+{
+  nvalid = length(pred_test)
+  agree.count = 0
+  pair.count = 0
+  for (i in 2:nvalid)
+  {
+    for (j in 1:(i-1))
+    {
+      pair.count = pair.count + death[j]
+      agree.count = agree.count + death[j]*((pred_test[i] >= pred_test[j]) == (truth_test[i] >= truth_test[j]))
+    }
+  }
+  
+  concord = agree.count / pair.count
+  return(concord)
+}
+
+ndata = nrow(data_BIDC_common)
+nvalid = floor(0.3*nrow(data_BIDC_common))
+
+#ndata = nrow(dataX)
+#nvalid = floor(0.3*nrow(dataX))
+
+#set.seed(4)
+
+set.seed(4)
+index = sample(1:ndata, size = nvalid, replace = FALSE)
+test_data = data_BIDC_common[index,]
+train_data = data_BIDC_common[-index,]
+
+#en.gehan = penAFT(dataX[-index,], logY[-index], delta[-index], alpha = 0.6, lambda = c(lambda.gehan))
+
+set.seed(8)
+en.gehan.cv = penAFT.cv(dataX[-index,], logY[-index], delta[-index], alpha = 0.5, nlambda = 30, nfold = 5, standardize = FALSE)
+
+############################################################
+###### Change after fixing package #########################
+
+lambda = en.gehan.cv$full.fit$lambda
+cv.err.linPred = en.gehan.cv$cv.err.linPred
+lambda[which(cv.err.linPred == min(cv.err.linPred))]
+
+best.ind = which.min(cv.err.linPred)
+lambda.min = lambda[which.min(cv.err.linPred)]
+lambda.gehan = lambda.min
+
+#beta.gehan = fit.en.cv$full.fit$beta[,best.ind]
+############################################################
+
+#saveRDS(en.gehan.cv, file = 'gehan_train.RDS')
+#en.gehan = penAFT(dataX[-index,], logY[-index], delta[-index], alpha = 0.6, nlambda = 10)
+
+x = model_matrix
+
+set.seed(6)
+p = ncol(x)
+penalty = c(0, rep(1, p-1))
+en.cox.cv =  cv.glmnet(x[-index,], y[-index,], family = "cox", alpha = 0.5, nlambda = 30, nfold = 5)
+
+
+```
+
+
+```{r}
+en.cox.cv$index
+
+beta.cox = en.cox.cv$glmnet.fit$beta[,8]
+lambda.cox = en.cox.cv$glmnet.fit$lambda[8]
+preds.cox <- x[index,]%*%beta.cox
+
+truth_test = logY[index]
+death = delta[index]
+
+
+preds.gehan <- penAFT.predict(en.gehan.cv, Xnew = dataX[index,], lambda = lambda.gehan)
+
+get.concordance(-preds.cox, truth_test, death)
+get.concordance(preds.gehan, truth_test, death)
+
+
+```
+
+## Causal Inference
+
+### Propensity Scores
+
+```{r}
+
+x = model_matrix
+
+delta = 1*(data_BIDC_common$death_from_cancer == "Died of Disease")
+y = Surv(data_BIDC_common$overall_survival_months, delta)
+
+# PROPENSITY SCORES 
+
+vars1 = paste(main_effects, collapse = " + ")
+vars2 = paste(categorical_vars, collapse = " + ")
+vars3 = paste(categorical_recoded, collapse = " + ")
+vars3 = paste(gene_expr_names, collapse = " + ")
+vars4 = paste(interaction_terms, collapse = " + ")
+
+x = model_matrix
+
+vars_all = paste(vars1, vars2, vars3, vars4, sep = " + ")
+form_2 = paste("treatment ~  ", vars_all)
+
+x_prop <- model.matrix(as.formula(form_2), data = data_BIDC_common_std)
+treatment = data_BIDC_common$treatment
+
+# ridge regression
+set.seed(3)
+prop.cv  = cv.glmnet(x_prop, treatment, family = "binomial", alpha = 0, nlambda = 30, nfold = 5)
+e.vec = predict(prop.cv, newx = x_prop, s = prop.cv$lambda.min, type = 'response')
+omega = 1
+W.vec = omega / (treatment*e.vec + (1-treatment)*e.vec)
+W.vec = c(W.vec)
+```
+
+### EDA
+
+```{r}
+data_EDA = data_BIDC_common
+data_EDA$prop_score = e.vec
+
+data_EDA$death = ifelse(delta, "Yes", "No")
+
+
+print(nrow(data_EDA))
+print(sum(delta))
+
+print(sum(data_EDA$treatment))
+print(nrow(data_EDA) - sum(data_EDA$treatment))
+
+print(sum(data_EDA$treatment == 1 & delta))
+print(sum(data_EDA$treatment == 0 & delta))
+
+data_EDA$treatment_name = ifelse(data_EDA$type_of_breast_surgery == 'MASTECTOMY', 'Mastectomy', 'BCS')
+
+
+g1 <- ggplot(data_EDA, aes(x = type_of_breast_surgery, fill = death)) +
+  geom_bar(position = "fill") +
+  ggtitle("Censoring by Treatment") +
+  theme(axis.title.x = element_blank()) +
+  labs(fill = "Death Observed", y = "Proportion")
+
+
+# pdf("plots/censoring_by_trt.pdf", height = 3.5, width = 6)
+# g1
+# dev.off()
+
+g1
+
+#####################################
+
+# w.out1 <- WeightIt::weightit(
+#     treatment ~ age + income + dnr1 + cat2 + gastr +  
+#           aps1 + sod1 + ninsclas,
+#     data = rhc_processed, estimand = "ATE", method = "ps")
+# 
+# w.out1 <- WeightIt::weightit(as.formula(form_2), data = data_BIDC_common_std, estimand = "ATE", method = "ps")
+# 
+# love.plot(w.out1)
+
+```
+
+```{r}
+sum(data_EDA$treatment)
+```
+
+
+```{r}
+data_EDA = data_BIDC_common
+data_EDA$prop_score = e.vec
+data_EDA$Mastectomy = as.factor(data_EDA$treatment)
+
+p_prop_score <- ggplot(data_EDA, aes(x = prop_score, fill = as.factor(treatment), 
+                                color = as.factor(treatment))) + 
+  geom_density(alpha = 0.5) + 
+  labs(x = "Propensity Score", 
+       y = "Density", 
+       fill = "Treatment:") + 
+  scale_color_discrete(guide = "none")
+p_prop_score
+
+#ggsave("plots/prop_scores.pdf", p_prop_score, width = 8, height = 4)
+```
+
+```{r}
+
+PlotKMCurve <- function(group_var, var_name = NULL, data, y) {
+  if (is.null(var_name)) var_name <- group_var
+  survfit2(y ~ get(group_var), data = data) %>% 
+    ggsurvfit() +
+    add_confidence_interval() +
+    labs(
+      x = "Months",
+      y = "Survival probability",
+      fill = element_blank(), color = element_blank()
+    )
+}
+
+fig1 <- PlotKMCurve("Mastectomy", var_name = NULL, data_EDA, y) +
+  labs(subtitle = "Survival Curves by Treatment") +
+  scale_color_manual(values = c("purple", "orange"), labels = c("BCS", "Mastectomy")) +
+  scale_fill_manual(values = c("purple", "orange"), labels = c("BCS", "Mastectomy"))
+
+pdf("plots/surv_curve.pdf", height = 3.5, width = 6)
+fig1
+dev.off()
+
+fig1
+
+fig_stage1 <- PlotKMCurve("Mastectomy", var_name = NULL, data_EDA[data_EDA$tumor_stage == 1,], y[data_EDA$tumor_stage == 1,]) +
+  labs(subtitle = "Stage I Tumor Patients") +
+  scale_color_manual(values = c("purple", "orange"), labels = c("BCS", "Mastectomy")) +
+  scale_fill_manual(values = c("purple", "orange"), labels = c("BCS", "Mastectomy"))
+
+fig_stage2 <- PlotKMCurve("Mastectomy", var_name = NULL, data_EDA[data_EDA$tumor_stage == 2,], y[data_EDA$tumor_stage == 2,]) +
+  labs(subtitle = "Stage II Tumor Patients") +
+  scale_color_manual(values = c("purple", "orange"), labels = c("BCS", "Mastectomy")) +
+  scale_fill_manual(values = c("purple", "orange"), labels = c("BCS", "Mastectomy"))
+
+
+fig_stage3 <- PlotKMCurve("Mastectomy", var_name = NULL, data_EDA[data_EDA$tumor_stage == 3,], y[data_EDA$tumor_stage == 3,]) +
+  labs(subtitle = "Stage III Tumor Patients") +
+  scale_color_manual(values = c("purple", "orange"), labels = c("BCS", "Mastectomy")) +
+  scale_fill_manual(values = c("purple", "orange"), labels = c("BCS", "Mastectomy"))
+
+
+fig_stage1
+fig_stage2
+fig_stage3
+
+
+# Arrange the plots side by side
+combined_plots <- grid.arrange(fig_stage1, fig_stage2, fig_stage3, ncol = 3)
+
+# Save the arranged plots as a PDF
+ggsave("plots/stages_surv.pdf", combined_plots, width = 10, height = 4)
+
+
+pdf("plots/stage1_diff.pdf", height = 3.5, width = 6)
+fig_stage1
+dev.off()
+
+pdf("plots/stage2_diff.pdf", height = 3.5, width = 6)
+fig_stage2
+dev.off()
+
+pdf("plots/stage3_diff.pdf", height = 3.5, width = 6)
+fig_stage3
+dev.off()
+
+```
+
+```{r}
+
+# Exclude treatment from the penalized predictors
+p = ncol(x)
+penalty = c(0, 0, rep(1, p-2))
+
+
+set.seed(4)
+cox.cv = cv.glmnet(x, y, weights = W.vec, penalty.factor = penalty, family = "cox", alpha = 0.5, nlambda = 30, nfold = 5)
+lambda.cox = cox.cv$lambda.min
+
+cox.fit =  glmnet(x, y, weights = W.vec, family = "cox", alpha = 0.5, penalty.factor = penalty, lambda = c(lambda.cox))
+```
+
+```{r}
+cox.fit$beta[,1]['treatment']
+
+cox.en.beta = cox.fit$beta[,1]
+cox.en.beta.nonzero = cox.fit$beta[,1][abs(cox.fit$beta[,1]) > 1e-10][order(cox.fit$beta[,1][abs(cox.fit$beta[,1]) > 1e-10], decreasing = TRUE)]
+
+length(cox.en.beta.nonzero)
+cox.en.beta.nonzero
+```
+
+
+
+### Sensitivity Anaysis - different MICE imputations
+
+```{r}
+x_2 = model_matrix_2
+x_3 = model_matrix_3
+x_4 = model_matrix_4
+x_5 = model_matrix_5
+
+x_prop_2 <- model.matrix(as.formula(form_2), data = data_BIDC_common_std_2)
+x_prop_3 <- model.matrix(as.formula(form_2), data = data_BIDC_common_std_3)
+x_prop_4 <- model.matrix(as.formula(form_2), data = data_BIDC_common_std_4)
+x_prop_5 <- model.matrix(as.formula(form_2), data = data_BIDC_common_std_5)
+
+# ridge regression
+set.seed(3)
+prop.cv_2  = cv.glmnet(x_prop_2, treatment_2, family = "binomial", alpha = 0, nlambda = 30, nfold = 5)
+e.vec_2 = predict(prop.cv_2, newx = x_prop_2, s = prop.cv_2$lambda.min, type = 'response')
+omega = 1
+W.vec_2 = omega / (treatment_2*e.vec_2 + (1-treatment_2)*e.vec_2)
+
+set.seed(3)
+prop.cv_3  = cv.glmnet(x_prop_3, treatment_3, family = "binomial", alpha = 0, nlambda = 30, nfold = 5)
+e.vec_3 = predict(prop.cv_3, newx = x_prop_3, s = prop.cv_3$lambda.min, type = 'response')
+omega = 1
+W.vec_3 = omega / (treatment_3*e.vec_3 + (1-treatment_3)*e.vec_3)
+
+set.seed(3)
+prop.cv_4  = cv.glmnet(x_prop_4, treatment_4, family = "binomial", alpha = 0, nlambda = 30, nfold = 5)
+e.vec_4 = predict(prop.cv_4, newx = x_prop_4, s = prop.cv_4$lambda.min, type = 'response')
+omega = 1
+W.vec_4 = omega / (treatment_4*e.vec_4 + (1-treatment_4)*e.vec_4)
+
+set.seed(3)
+prop.cv_5  = cv.glmnet(x_prop_5, treatment_5, family = "binomial", alpha = 0, nlambda = 30, nfold = 5)
+e.vec_5 = predict(prop.cv_5, newx = x_prop_5, s = prop.cv_5$lambda.min, type = 'response')
+omega = 1
+W.vec_5 = omega / (treatment_5*e.vec_5 + (1-treatment_5)*e.vec_5)
+
+
+
+set.seed(4)
+cox.cv_2 = cv.glmnet(x_2, y_2, weights = W.vec_2, penalty.factor = penalty, family = "cox", alpha = 0.5, nlambda = 30, nfold = 5)
+lambda.cox_2 = cox.cv_2$lambda.min
+
+cox.fit_2 =  glmnet(x_2, y_2, weights = W.vec_2, family = "cox", alpha = 0.5, penalty.factor = penalty, lambda = c(lambda.cox_2))
+
+set.seed(4)
+cox.cv_3 = cv.glmnet(x_3, y_3, weights = W.vec_3, penalty.factor = penalty, family = "cox", alpha = 0.5, nlambda = 30, nfold = 5)
+lambda.cox_3 = cox.cv_3$lambda.min
+
+cox.fit_3 =  glmnet(x_3, y_3, weights = W.vec_3, family = "cox", alpha = 0.5, penalty.factor = penalty, lambda = c(lambda.cox_3))
+
+set.seed(4)
+cox.cv_4 = cv.glmnet(x_4, y_4, weights = W.vec_4, penalty.factor = penalty, family = "cox", alpha = 0.5, nlambda = 30, nfold = 5)
+lambda.cox_4 = cox.cv_4$lambda.min
+
+cox.fit_4 =  glmnet(x_4, y_4, weights = W.vec_4, family = "cox", alpha = 0.5, penalty.factor = penalty, lambda = c(lambda.cox_4))
+
+set.seed(4)
+cox.cv_5 = cv.glmnet(x_5, y_5, weights = W.vec_5, penalty.factor = penalty, family = "cox", alpha = 0.5, nlambda = 30, nfold = 5)
+lambda.cox_5 = cox.cv_5$lambda.min
+
+cox.fit_5 =  glmnet(x_5, y_5, weights = W.vec_5, family = "cox", alpha = 0.5, penalty.factor = penalty, lambda = c(lambda.cox_5))
+
+```
+
+```{r}
+
+cox.en.beta_2 = cox.fit_2$beta[,1]
+cox.en.beta.nonzero_2 = cox.fit_2$beta[,1][abs(cox.fit_2$beta[,1]) > 1e-10][order(cox.fit_2$beta[,1][abs(cox.fit_2$beta[,1]) > 1e-10], decreasing = TRUE)]
+
+cox.en.beta_3 = cox.fit_3$beta[,1]
+cox.en.beta.nonzero_3 = cox.fit_3$beta[,1][abs(cox.fit_3$beta[,1]) > 1e-10][order(cox.fit_3$beta[,1][abs(cox.fit_3$beta[,1]) > 1e-10], decreasing = TRUE)]
+
+cox.en.beta_2 = cox.fit_2$beta[,1]
+cox.en.beta.nonzero_2 = cox.fit_2$beta[,1][abs(cox.fit_2$beta[,1]) > 1e-10][order(cox.fit_2$beta[,1][abs(cox.fit_2$beta[,1]) > 1e-10], decreasing = TRUE)]
+
+cox.en.beta.nonzero_2
+cox.en.beta.nonzero_3
+
+nonzero_2 = as.numeric(which(abs(cox.fit_2$beta[,1]) > 1e-10))
+nonzero_3 = as.numeric(which(abs(cox.fit_3$beta[,1]) > 1e-10))
+nonzero_4 = as.numeric(which(abs(cox.fit_4$beta[,1]) > 1e-10))
+nonzero_5 = as.numeric(which(abs(cox.fit_5$beta[,1]) > 1e-10))
+```
+
+```{r}
+common = intersect(nonzero_2, intersect(nonzero_3, intersect(nonzero_4, nonzero_5)))
+
+cox.fit_2$beta[common,1]
+
+cox.fit_2$beta[common]
+cox.fit_3$beta[common]
+cox.fit_4$beta[common]
+cox.fit_5$beta[common]
+
+sum((cox.fit$beta[common] > 0 & cox.fit_2$beta[common] <= 0) | (cox.fit$beta[common] <= 0 & cox.fit_2$beta[common] > 0)) 
+
+sum((cox.fit_2$beta[common] > 0 & cox.fit_3$beta[common] <= 0) | (cox.fit_2$beta[common] <= 0 & cox.fit_3$beta[common] > 0)) 
+
+sum((cox.fit_2$beta[common] > 0 & cox.fit_4$beta[common] <= 0) | (cox.fit_2$beta[common] <= 0 & cox.fit_4$beta[common] > 0)) 
+
+sum((cox.fit_2$beta[common] > 0 & cox.fit_5$beta[common] <= 0) | (cox.fit_2$beta[common] <= 0 & cox.fit_5$beta[common] > 0)) 
+```
+
+
+```{r}
+get.race.unpenalized = function(x, model, weights)
+{
+  n = nrow(x)
+  ind = which(names(x) == 'treatment')
+  x0 = x
+  x1 = x
+  x0[,ind] = 0
+  x1[,ind] = 1
+  
+  scurve0 = survfit(model, newdata = x0, weights = W.vec)
+  scurve1 = survfit(model, newdata = x1, weights = W.vec)
+  
+  AUC0 = sum(rowMeans(scurve0$surv) * c(scurve0$time[1], diff(scurve0$time)))
+  AUC1 = sum(rowMeans(scurve1$surv) * c(scurve1$time[1], diff(scurve1$time)))
+  
+  RACE = AUC1 - AUC0
+  return(RACE)
+
+}
+```
+
+Fitting the Cox model with selected variables
+
+```{r}
+data_matrix = data.frame(model_matrix)
+```
+
+```{r}
+coxmodel <- coxph(y ~ kdm3a.kdm3a_mut  + lymph_nodes_examined_positive +
+                      treatment      +     integrative_cluster5 +
+                    integrative_cluster3 +
+                          gsk3b      +      treatment.tumor_size +
+                          prkg1     +             treatment.e2f8 +
+                       eif4ebp1      +          treatment.zfyve9 +
+                treatment.ush2a       +                     dll3 +
+                treatment.nrarp        +              tumor_size +
+                 treatment.e2f7         +                   e2f7 +
+                          smad7          +                  men1 +
+                         prkacg           +     treatment.notch1 +
+                          pdgfb            +        tumor_stage2 +
+                          mmp25             +   treatment.acvr1c +
+               treatment.srd5a3             +  treatment.hsd17b7 +
+                           mlh1             +              casp7 +
+                          brca2             +     treatment.rpgr +
+              treatment.ugt2b17             +               igf1 +
+                 treatment.nrg3             +             map3k1 +
+                           mapt             +               e2f1 +
+                        ugt2b17 +
+                 treatment.inha             +             diras3 +
+                  tp53.tp53_mut             +        atr.atr_mut +
+                gata3.gata3_mut             +             acvr1c +
+                           cul1             +             stat5a +
+                 treatment.cul1 + pam50_._claudin.low_subtypeLumA +
+                birc6.birc6_mut           +    treatment.cyp11a1 +
+                  tbx3.tbx3_mut           +       treatment.mapt, weights = c(W.vec), data = data_matrix)
+```
+
+```{r}
+summary(coxmodel)
+```
+
+
+```{r}
+mod = coxmodel
+sum.cox = summary(coxmodel)
+
+sum.cox$coefficients
+
+sum.cox$conf.int
+
+coefs = tibble(coef = rownames(sum.cox$coefficients), estimate = unname(sum.cox$coefficients[,1]), exp_estimate = unname(sum.cox$coefficients[,2]),
+               robust_se = unname(sum.cox$coefficients[,4]), pval = unname(sum.cox$coefficients[,6]))
+
+xtable(coefs, caption = "…", digits = 3, display = c('g','g', 'g', 'g', 'g', 'g')) 
+
+CI_tabl = sum.cox$conf.int[2:52,c(1,3,4)]
+colnames(CI_tabl) = c('Estimate', 'Lower CI', 'Upper CI')
+
+#rownames(CI_tabl)
+#coefs
+```
+
+```{r}
+
+
+rownames(CI_tabl)[rownames(CI_tabl) == 'treatment'] = '<> TREATMENT <>'
+rownames(CI_tabl)[rownames(CI_tabl) == 'tbx3.tbx3_mut'] = '* tbx3:tbx3 mutation'
+rownames(CI_tabl)[rownames(CI_tabl) == 'gata3.gata3_mut'] = '* gata3:gata3 mutuation'
+rownames(CI_tabl)[rownames(CI_tabl) == 'ugt2b17'] = '* ugt2b17'
+rownames(CI_tabl)[rownames(CI_tabl) == 'cul1'] = '* cul1'
+rownames(CI_tabl)[rownames(CI_tabl) == 'treatment.cyp11a1'] = '* treatment:cyp11a1'
+rownames(CI_tabl)[rownames(CI_tabl) == 'tp53.tp53_mut'] = '* tp53:tp53 mutation'
+rownames(CI_tabl)[rownames(CI_tabl) == 'treatment.inha'] = '* treatment:inha'
+rownames(CI_tabl)[rownames(CI_tabl) == 'e2f1'] = '* e2f1'
+rownames(CI_tabl)[rownames(CI_tabl) == 'brca2'] = '* brca2'
+rownames(CI_tabl)[rownames(CI_tabl) == 'prkacg'] = '* prkacg'
+rownames(CI_tabl)[rownames(CI_tabl) == 'integrative_cluster5'] = '* integrative cluster 5'
+rownames(CI_tabl)[rownames(CI_tabl) == 'treatment.ush2a'] = '* treatment:ush2a'
+rownames(CI_tabl)[rownames(CI_tabl) == 'prkg1'] = '* prkg1'
+rownames(CI_tabl)[rownames(CI_tabl) == 'lymph_nodes_examined_positive'] = '* lymph nodes examined positive'
+rownames(CI_tabl)[rownames(CI_tabl) == 'treatment.mapt'] = '* treatment:mapt'
+
+########################
+rownames(CI_tabl)[rownames(CI_tabl) == 'integrative_cluster3'] = 'integrative cluster 3'
+rownames(CI_tabl)[rownames(CI_tabl) == 'treatment.tumor_size'] = 'treatment:tumor size'
+rownames(CI_tabl)[rownames(CI_tabl) == 'treatment.e2f8'] = 'treatment:e2f8'
+rownames(CI_tabl)[rownames(CI_tabl) == 'treatment.zfyve9'] = 'treatment:zfyve9'
+rownames(CI_tabl)[rownames(CI_tabl) == 'treatment.nrarp'] = 'treatment:nrarp'
+rownames(CI_tabl)[rownames(CI_tabl) == 'tumor_size'] = 'tumor size'
+rownames(CI_tabl)[rownames(CI_tabl) == 'treatment.e2f7'] = 'treatment:e2f7'
+rownames(CI_tabl)[rownames(CI_tabl) == 'treatment.notch1'] = 'treatment:notch1'
+rownames(CI_tabl)[rownames(CI_tabl) == 'tumor_stage2'] = 'tumor stage 2'
+rownames(CI_tabl)[rownames(CI_tabl) == 'treatment.acvr1c'] = 'treatment:acvr1c'
+rownames(CI_tabl)[rownames(CI_tabl) == 'treatment.srd5a3'] = 'treatment:srd5a3'
+rownames(CI_tabl)[rownames(CI_tabl) == 'treatment.hsd17b7'] = 'treatment:hsd17b7'
+rownames(CI_tabl)[rownames(CI_tabl) == 'treatment.ugt2b17'] = 'treatment:ugt2b17'
+rownames(CI_tabl)[rownames(CI_tabl) == 'treatment.nrg3'] = 'treatment:nrg3'
+rownames(CI_tabl)[rownames(CI_tabl) == 'treatment.inha'] = 'treatment:inha'
+rownames(CI_tabl)[rownames(CI_tabl) == 'atr.atr_mut'] = 'atr:atr mutation'
+rownames(CI_tabl)[rownames(CI_tabl) == 'treatment.cul1'] = 'treatment:cul1'
+
+rownames(CI_tabl)[rownames(CI_tabl) == 'pam50_._claudin.low_subtypeLumA'] = 'pam50 and claudin low subtype LumA'
+rownames(CI_tabl)[rownames(CI_tabl) == 'birc6.birc6_mut'] = 'birc6:birc6 mutation'
+
+CI_tabl_df <- as.data.frame(CI_tabl)
+CI_tabl_df$Covariate <- rownames(CI_tabl)
+
+# ggplot(data = CI_tabl_df, aes(x = Covariate, y = Estimate)) +
+#   geom_point(size = 3) +
+#   geom_errorbar(aes(ymin = `Lower CI`, ymax = `Upper CI`), width = 0.2) +
+#   labs(x = "Covariate", y = "Estimate") +
+#   theme_bw() +
+#   theme(axis.text.x = element_text(angle = 45, hjust = 1))
+# 
+# 
+# ggplot(data = CI_tabl_df, aes(x = Covariate, y = Estimate)) +
+#   geom_point(size = 3) +
+#   geom_errorbarh(aes(xmin = `Lower CI`, xmax = `Upper CI`), height = 0.2) +
+#   labs(x = "Covariate", y = "Estimate") +
+#   coord_flip() +
+#   theme_bw() +
+#   theme(axis.text.y = element_text(hjust = 1))
+# 
+# 
+# ggplot(data = CI_tabl_df, aes(y = Covariate, x = Estimate)) +
+#   geom_point(size = 1) +
+#   geom_errorbarh(aes(xmin = `Lower CI`, xmax = `Upper CI`), height = 0.2) +
+#   labs(y = "Covariate", x = "Estimate") +
+#   theme_bw() +
+#   theme(axis.text.y = element_text(hjust = 1))
+# 
+
+#######################
+
+# Custom function to determine bar and text color
+color_CI <- function(lower, upper, threshold = 1) {
+  if (lower > threshold) {
+    return("red")
+  } else if (upper < threshold) {
+    return("green")
+  } else {
+    return("black")
+  }
+}
+
+# Apply custom function to the data frame
+CI_tabl_df$Color <- mapply(color_CI, CI_tabl_df$`Lower CI`, CI_tabl_df$`Upper CI`)
+
+# # Create the plot
+# ggplot(data = CI_tabl_df, aes(y = Covariate, x = Estimate, color = Color)) +
+#   geom_point(size = 1) +
+#   geom_errorbarh(aes(xmin = `Lower CI`, xmax = `Upper CI`), height = 0.2, color = CI_tabl_df$Color) +
+#   geom_segment(aes(x = `Lower CI`, xend = `Lower CI`, y = as.numeric(Covariate) - 0.1, yend = as.numeric(Covariate) + 0.1)) +
+#   geom_segment(aes(x = `Upper CI`, xend = `Upper CI`, y = as.numeric(Covariate) - 0.1, yend = as.numeric(Covariate) + 0.1)) +
+#   geom_vline(xintercept = 1, linetype = "dashed", color = "blue") +
+#   labs(y = "Covariate", x = "Estimate") +
+#   scale_color_identity() +
+#   theme_bw() +
+#   theme(axis.text.y = element_text(hjust = 1))
+# 
+# ######################################
+# 
+# # Create a data frame for axis labels
+# axis_labels <- data.frame(Covariate = CI_tabl_df$Covariate, Color = CI_tabl_df$Color)
+# rownames(axis_labels) <- axis_labels$Covariate
+# 
+# # Create the plot
+# ggplot(data = CI_tabl_df, aes(y = Covariate, x = Estimate, color = Color)) +
+#   geom_point(size = 1) +
+#   geom_errorbarh(aes(xmin = `Lower CI`, xmax = `Upper CI`), height = 0.2, color = CI_tabl_df$Color) +
+#   geom_segment(aes(x = `Lower CI`, xend = `Lower CI`, y = as.numeric(Covariate) - 0.1, yend = as.numeric(Covariate) + 0.1)) +
+#   geom_segment(aes(x = `Upper CI`, xend = `Upper CI`, y = as.numeric(Covariate) - 0.1, yend = as.numeric(Covariate) + 0.1)) +
+#   geom_vline(xintercept = 1, linetype = "dashed", color = "blue") +
+#   labs(y = NULL, x = "Estimate") +
+#   scale_y_discrete(labels = axis_labels$Covariate) +
+#   scale_color_identity() +
+#   theme_bw() +
+#   theme(axis.text.y = element_markdown(color = axis_labels$Color))
+
+
+###########################
+# 
+# # Sort the data frame by increasing point estimates
+# CI_tabl_df <- CI_tabl_df %>% arrange(Estimate)
+# 
+# # Update the axis labels data frame
+# axis_labels <- data.frame(Covariate = CI_tabl_df$Covariate, Color = CI_tabl_df$Color)
+# rownames(axis_labels) <- axis_labels$Covariate
+# 
+# # Create the plot
+# ggplot(data = CI_tabl_df, aes(y = Covariate, x = Estimate, color = Color)) +
+#   geom_point(size = 3) +
+#   geom_errorbarh(aes(xmin = `Lower CI`, xmax = `Upper CI`), height = 0.2, color = CI_tabl_df$Color) +
+#   geom_segment(aes(x = `Lower CI`, xend = `Lower CI`, y = as.numeric(Covariate) - 0.1, yend = as.numeric(Covariate) + 0.1)) +
+#   geom_segment(aes(x = `Upper CI`, xend = `Upper CI`, y = as.numeric(Covariate) - 0.1, yend = as.numeric(Covariate) + 0.1)) +
+#   geom_vline(xintercept = 1, linetype = "dashed", color = "blue") +
+#   labs(y = NULL, x = "Estimate") +
+#   scale_y_discrete(labels = axis_labels$Covariate) +
+#   scale_color_identity() +
+#   theme_bw() +
+#   theme(axis.text.y = # Sort the data frame by increasing point estimates
+# CI_tabl_df <- CI_tabl_df %>% arrange(Estimate)
+
+# Convert the 'Covariate' column to a factor and specify the levels in the desired order
+# CI_tabl_df$Covariate <- factor(CI_tabl_df$Covariate, levels = CI_tabl_df$Covariate)
+# 
+# # Update the axis labels data frame
+# axis_labels <- data.frame(Covariate = CI_tabl_df$Covariate, Color = CI_tabl_df$Color)
+# rownames(axis_labels) <- axis_labels$Covariate
+# 
+# # Create the plot
+# ggplot(data = CI_tabl_df, aes(y = Covariate, x = Estimate, color = Color)) +
+#   geom_point(size = 3) +
+#   geom_errorbarh(aes(xmin = `Lower CI`, xmax = `Upper CI`), height = 0.2, color = CI_tabl_df$Color) +
+#   geom_segment(aes(x = `Lower CI`, xend = `Lower CI`, y = as.numeric(Covariate) - 0.1, yend = as.numeric(Covariate) + 0.1)) +
+#   geom_segment(aes(x = `Upper CI`, xend = `Upper CI`, y = as.numeric(Covariate) - 0.1, yend = as.numeric(Covariate) + 0.1)) +
+#   geom_vline(xintercept = 1, linetype = "dashed", color = "blue") +
+#   labs(y = NULL, x = "Estimate") +
+#   scale_color_identity() +
+#   theme_bw() +
+#   theme(axis.text.y = element_markdown(color = axis_labels$Color))
+#  element_text(hjust = 1))
+
+##############################################
+
+# # Sort the data frame by increasing point estimates
+# CI_tabl_df <- CI_tabl_df %>% arrange(Estimate)
+# 
+# # Convert the 'Covariate' column to a factor and specify the levels in the desired order
+# CI_tabl_df$Covariate <- factor(CI_tabl_df$Covariate, levels = CI_tabl_df$Covariate)
+# 
+# # Update the axis labels data frame
+# axis_labels <- data.frame(Covariate = CI_tabl_df$Covariate, Color = CI_tabl_df$Color)
+# rownames(axis_labels) <- axis_labels$Covariate
+# 
+# # Create the plot
+# ggplot(data = CI_tabl_df, aes(y = Covariate, x = Estimate, color = Color)) +
+#   geom_point(size = 3) +
+#   geom_errorbarh(aes(xmin = `Lower CI`, xmax = `Upper CI`), height = 0.2, color = CI_tabl_df$Color) +
+#   geom_segment(aes(x = `Lower CI`, xend = `Lower CI`, y = as.numeric(Covariate) - 0.1, yend = as.numeric(Covariate) + 0.1)) +
+#   geom_segment(aes(x = `Upper CI`, xend = `Upper CI`, y = as.numeric(Covariate) - 0.1, yend = as.numeric(Covariate) + 0.1)) +
+#   geom_vline(xintercept = 1, linetype = "dashed", color = "blue") +
+#   labs(y = NULL, x = "Estimate") +
+#   scale_color_identity() +
+#   theme_bw() +
+#   theme(axis.text.y = # Sort the data frame by increasing point estimates
+
+CI_tabl_df <- CI_tabl_df %>% arrange(-Estimate)
+
+###############################################
+
+# Convert the 'Covariate' column to a factor and specify the levels in the desired order
+CI_tabl_df$Covariate <- factor(CI_tabl_df$Covariate, levels = CI_tabl_df$Covariate)
+
+# CI_tabl_df$Covariate[CI_tabl_df$Covariate == 'treatment'] = 'TREATMENT'
+# CI_tabl_df$Covariate[CI_tabl_df$Covariate == 'tbx.tbx3_mut'] = '* tbx.tbx3_mut'
+# CI_tabl_df$Covariate[CI_tabl_df$Covariate == 'gata.gata3_mut'] = '* gata.gata3_mut'
+# CI_tabl_df$Covariate[CI_tabl_df$Covariate == 'ugt2b17'] = '* ugt2b17'
+
+
+# Update the axis labels data frame
+#axis_labels <- data.frame(Covariate = CI_tabl_df$Covariate, Color = CI_tabl_df$Color)
+#rownames(axis_labels) <- axis_labels$Covariate
+
+# Create the plot
+res_plot = ggplot(data = CI_tabl_df, aes(y = Covariate, x = Estimate, color = Color)) +
+  geom_point(size = 2) +
+  geom_errorbarh(aes(xmin = `Lower CI`, xmax = `Upper CI`), height = 0.2, color = CI_tabl_df$Color) +
+  geom_segment(aes(x = `Lower CI`, xend = `Lower CI`, y = as.numeric(Covariate) - 0.1, yend = as.numeric(Covariate) + 0.1)) +
+  geom_segment(aes(x = `Upper CI`, xend = `Upper CI`, y = as.numeric(Covariate) - 0.1, yend = as.numeric(Covariate) + 0.1)) +
+  geom_vline(xintercept = 1, linetype = "dashed", color = "blue") +
+  labs(y = NULL, x = "exp(coefficient)") +
+  scale_color_identity() +
+  theme_bw() +
+  theme(axis.text.y =  element_text(hjust = 1))
+
+res_plot
+```
+
+```{r}
+ggsave("plots/res_plot.pdf", res_plot, width = 8, height = 6)
+```
+
+```{r}
+#survfit(formula = coxmodel, newdata = data_matrix)
+
+get.race.unpenalized(data_matrix, coxmodel, W.vec)
+```
+
+### Sensitivity Analysis - Propensity Scores
+
+```{r}
+coxmodel_overlap <- coxph(y[e.vec > 0.40 & e.vec < 0.75] ~ kdm3a.kdm3a_mut  + lymph_nodes_examined_positive +
+                      treatment      +     as.factor(integrative_cluster5) +
+                    as.factor(integrative_cluster3) +
+                          gsk3b      +      treatment.tumor_size +
+                          prkg1     +             treatment.e2f8 +
+                       eif4ebp1      +          treatment.zfyve9 +
+                treatment.ush2a       +                     dll3 +
+                treatment.nrarp        +              tumor_size +
+                 treatment.e2f7         +                   e2f7 +
+                          smad7          +                  men1 +
+                         prkacg           +     treatment.notch1 +
+                          pdgfb            +        as.factor(tumor_stage2) +
+                          mmp25             +   treatment.acvr1c +
+               treatment.srd5a3             +  treatment.hsd17b7 +
+                           mlh1             +              casp7 +
+                          brca2             +     treatment.rpgr +
+              treatment.ugt2b17             +               igf1 +
+                 treatment.nrg3             +             map3k1 +
+                           mapt             +               e2f1 +
+                        ugt2b17 +
+                 treatment.inha             +             diras3 +
+                  tp53.tp53_mut             +        atr.atr_mut +
+                gata3.gata3_mut             +             acvr1c +
+                           cul1             +             stat5a +
+                 treatment.cul1 + as.factor(pam50_._claudin.low_subtypeLumA) +
+                birc6.birc6_mut           +    treatment.cyp11a1 +
+                  tbx3.tbx3_mut           +       treatment.mapt, weights = W.vec[e.vec > 0.40 & e.vec < 0.75], data = data_matrix[e.vec > 0.40 & e.vec < 0.75,])
+
+```
+
+```{r}
+get.race.unpenalized(data_matrix[e.vec > 0.40 & e.vec < 0.75,], coxmodel_overlap, W.vec[e.vec > 0.40 & e.vec < 0.75])
+```
+
+In interest of saving computational time we run bootstrap beforehand and load the results here. The reader can uncomment the sections of code below if they wish to run the bootstrap.
+
+```{r}
+
+# BOOTSTARP 
+n = nrow(data_matrix)
+S = 1000
+boot.RACE.unpenalized = vector(length = S)
+ind_matrix = array(rep(NA, n*S), c(S,n))
+
+# set.seed(4)
+# for (i in 1:S)
+# {
+#   cat('Progress: ', i/S, '\n')
+#   boot_ind = sample(1:n, size = n, replace = TRUE)
+#   data_matrix_boot = x[boot_ind,]
+#   y_boot = y[boot_ind,]
+#   W_boot = W.vec[boot_ind]
+# 
+#   ind_matrix[i,] = boot_ind
+#   
+#   coxmodel.boot <- coxph(y_boot ~ kdm3a.kdm3a_mut  + lymph_nodes_examined_positive +
+#                       treatment      +     as.factor(integrative_cluster5) +
+#                     as.factor(integrative_cluster3) +
+#                           gsk3b      +      treatment.tumor_size +
+#                           prkg1     +             treatment.e2f8 +
+#                        eif4ebp1      +          treatment.zfyve9 +
+#                 treatment.ush2a       +                     dll3 +
+#                 treatment.nrarp        +              tumor_size +
+#                  treatment.e2f7         +                   e2f7 +
+#                           smad7          +                  men1 +
+#                          prkacg           +     treatment.notch1 +
+#                           pdgfb            +        as.factor(tumor_stage2) +
+#                           mmp25             +   treatment.acvr1c +
+#                treatment.srd5a3             +  treatment.hsd17b7 +
+#                            mlh1             +              casp7 +
+#                           brca2             +     treatment.rpgr +
+#               treatment.ugt2b17             +               igf1 +
+#                  treatment.nrg3             +             map3k1 +
+#                            mapt             +               e2f1 +
+#                         ugt2b17 +
+#                  treatment.inha             +             diras3 +
+#                   tp53.tp53_mut             +        atr.atr_mut +
+#                 gata3.gata3_mut             +             acvr1c +
+#                            cul1             +             stat5a +
+#                  treatment.cul1 + as.factor(pam50_._claudin.low_subtypeLumA) +
+#                 birc6.birc6_mut           +    treatment.cyp11a1 +
+#                   tbx3.tbx3_mut           +       treatment.mapt, weights = W_boot, data = data_matrix_boot)
+# 
+# 
+#   boot.RACE.unpenalized[i] = get.race.unpenalized(data_matrix_boot, coxmodel.boot, W_boot)
+# }
+
+
+#saveRDS(boot.RACE.unpenalized, file = 'boot_RACE_unpenalized.RDS')
+
+boot.RACE.unpenalized = readRDS(file = 'boot_RACE_unpenalized.RDS')
+
+```
+
+```{r}
+#boot.RACE.unpenalized
+quantile(boot.RACE.unpenalized, c(0.025, 0.975))
+```
+
+
+## Diagnostics
+
+### Cox-Snell Residuals
+
+```{r}
+source("http://myweb.uiowa.edu/pbreheny/7210/f18/notes/fun.R")
+sfit <- survfit(coxmodel)
+H0 <- -log(sfit$surv)
+H <- approxfun(c(0, sfit$time), c(0, H0), method='constant')
+e1 <- H(coxmodel$y[,1])*exp(coxmodel$linear.predictors)
+e2 <- coxmodel$y[,2]-residuals(coxmodel)
+head(e1)
+head(e2)
+
+
+efit <- survfit(Surv(e1, coxmodel$y[,2])~1)
+lim <- c(0,5)
+pdf("plots/cox_snell_resid.pdf", height = 3.5, width = 6)
+plot(efit, fun='cumhaz', mark.time=FALSE, bty='n', conf.int=FALSE, lwd=1, las=1,
+     xlab='Residual', ylab='Cumulative hazard', xlim=lim, ylim=lim)
+ciband(efit, fun=function(x) -log(x))
+lines(lim, lim, col='red', lwd=1)
+dev.off()
+
+plot(efit, fun='cumhaz', mark.time=FALSE, bty='n', conf.int=FALSE, lwd=1, las=1,
+     xlab='Residual', ylab='Cumulative hazard', xlim=lim, ylim=lim)
+ciband(efit, fun=function(x) -log(x))
+lines(lim, lim, col='red', lwd=1)
+
+
+```
+
+
+
